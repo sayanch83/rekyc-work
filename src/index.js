@@ -268,5 +268,15 @@ app.post('/api/reset', (_, res) => {
   res.json({ ok: true });
 });
 
+// Health check
+app.get('/health', (_, res) => {
+  res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString() });
+});
+
+// Root
+app.get('/', (_, res) => {
+  res.json({ service: 'Re-KYC API', version: '1.0.0', endpoints: ['/health', '/api/customers', '/api/files/:fileId'] });
+});
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Re-KYC API running → port ${PORT}`));
