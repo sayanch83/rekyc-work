@@ -37,9 +37,9 @@ const SEED = {
       zone: 'West', city: 'Mumbai', assignedTo: 'Priya Nair',
       due: '30 Apr 2026', status: 'Pending VKYC', kycType: 'Full KYC',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
         { name: 'Passport', meta: 'No. Z1234****  •  Exp: 15 Dec 2027', valid: true },
-        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 7842  •  No expiry', valid: true },
+        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 7842', valid: true },
       ],
       panStep: { status: 'Verified', date: '18 Apr 2026' },
       poiStep: { status: 'Verified', date: '18 Apr 2026', type: 'Passport', mode: 'Physical' },
@@ -65,8 +65,8 @@ const SEED = {
       zone: 'West', city: 'Mumbai', assignedTo: 'Kiran Desai',
       due: '30 Apr 2026', status: 'Completed', kycType: 'Self-Declaration',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
-        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 3156  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
+        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 3156', valid: true },
       ],
       panStep: { status: 'Verified', date: '20 Mar 2026' },
       poiStep: { status: 'Verified', date: '20 Mar 2026', type: 'Aadhaar', mode: 'DigiLocker' },
@@ -93,9 +93,9 @@ const SEED = {
       zone: 'North', city: 'Ahmedabad', assignedTo: 'Suresh Iyer',
       due: '30 Apr 2026', status: 'Completed', kycType: 'Full KYC',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
         { name: 'Driving Licence', meta: 'No. MH04****2030  •  Exp: 20 Mar 2030', valid: true },
-        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 9021  •  No expiry', valid: true },
+        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 9021', valid: true },
       ],
       panStep: { status: 'Verified', date: '02 Apr 2026' },
       poiStep: { status: 'Verified', date: '02 Apr 2026', type: 'Driving Licence', mode: 'Physical' },
@@ -127,7 +127,7 @@ const SEED = {
       zone: 'South', city: 'Hyderabad', assignedTo: 'Anjali Rao',
       due: '30 Apr 2026', status: 'Pending Doc Upload', kycType: 'Partial Update',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
         { name: 'Passport', meta: 'No. R9876****  •  Exp: 10 Aug 2028', valid: true },
       ],
       panStep: { status: 'Verified', date: '15 Apr 2026' },
@@ -152,8 +152,8 @@ const SEED = {
       zone: 'North', city: 'Chandigarh', assignedTo: null,
       due: '30 Apr 2026', status: 'Initiated', kycType: 'Full KYC',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
-        { name: 'Voter ID', meta: 'No. CHD/XXX****  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
+        { name: 'Voter ID', meta: 'No. CHD/XXX****', valid: true },
       ],
       panStep: { status: 'Pending', date: null },
       poiStep: { status: 'Pending', date: null, type: null, mode: null },
@@ -178,8 +178,8 @@ const SEED = {
       zone: 'West', city: 'Pune', assignedTo: 'Kiran Desai',
       due: '30 Apr 2026', status: 'Completed', kycType: 'Partial Update',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
-        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 8823  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
+        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 8823', valid: true },
       ],
       panStep: { status: 'Verified', date: '12 Mar 2026' },
       poiStep: { status: 'Verified', date: '12 Mar 2026', type: 'Aadhaar', mode: 'DigiLocker' },
@@ -206,8 +206,8 @@ const SEED = {
       zone: 'South', city: 'Kochi', assignedTo: 'Priya Nair',
       due: '30 Apr 2026', status: 'Link Generated', kycType: null,
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
-        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 4421  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
+        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 4421', valid: true },
       ],
       panStep: null, poiStep: null, poaStep: null, vkycStep: null,
       reminders: [
@@ -226,9 +226,9 @@ const SEED = {
       zone: 'South', city: 'Chennai', assignedTo: 'Anjali Rao',
       due: '30 Apr 2026', status: 'Pending Verification', kycType: 'Full KYC',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
-        { name: 'Voter ID', meta: 'No. TN/XXX****  •  No expiry', valid: true },
-        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 7712  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
+        { name: 'Voter ID', meta: 'No. TN/XXX****', valid: true },
+        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 7712', valid: true },
       ],
       panStep: { status: 'Verified', date: '12 Apr 2026' },
       poiStep: { status: 'Verified', date: '14 Apr 2026', type: 'Voter ID', mode: 'Physical' },
@@ -260,7 +260,7 @@ const SEED = {
       zone: 'North', city: 'Delhi', assignedTo: 'Mohit Sharma',
       due: '30 Apr 2026', status: 'Rejected', kycType: 'Full KYC',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
         { name: 'Passport', meta: 'No. M8765****  •  Exp: 22 Sep 2024 (EXPIRED)', valid: false },
       ],
       panStep: { status: 'Verified', date: '05 Apr 2026' },
@@ -291,9 +291,9 @@ const SEED = {
       zone: 'South', city: 'Chennai', assignedTo: 'Anjali Rao',
       due: '30 Apr 2026', status: 'Completed', kycType: 'Full KYC',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
         { name: 'Passport', meta: 'No. P2345****  •  Exp: 30 Jun 2029', valid: true },
-        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 5567  •  No expiry', valid: true },
+        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 5567', valid: true },
       ],
       panStep: { status: 'Verified', date: '28 Mar 2026' },
       poiStep: { status: 'Verified', date: '28 Mar 2026', type: 'Passport', mode: 'Physical' },
@@ -323,8 +323,8 @@ const SEED = {
       zone: 'South', city: 'Bengaluru', assignedTo: 'Mohit Sharma',
       due: '30 Apr 2026', status: 'In Progress', kycType: 'Full KYC',
       docsOnFile: [
-        { name: 'PAN Card', meta: 'No. ABCPS****K  •  No expiry', valid: true },
-        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 1144  •  No expiry', valid: true },
+        { name: 'PAN Card', meta: 'No. ABCPS****K', valid: true },
+        { name: 'Aadhaar Card', meta: 'No. XXXX XXXX 1144', valid: true },
       ],
       panStep: { status: 'Verified', date: '20 Apr 2026' },
       poiStep: { status: 'In Progress', date: null, type: 'Aadhaar', mode: 'DigiLocker' },
@@ -357,7 +357,29 @@ app.get('/api/customers/:id', (req, res) => { const db = loadDb(); const c = db.
 app.put('/api/customers/:id', (req, res) => {
   const db = loadDb(); const c = db.customers[req.params.id];
   if (!c) return res.status(404).json({ error: 'Not found' });
-  Object.assign(c, req.body);
+  const body = req.body;
+  // Merge fields
+  Object.assign(c, body);
+  // When status changes to Completed, update verification steps
+  if (body.status === 'Completed' && body.kycType) {
+    const d = today();
+    c.panStep = { status: 'Verified', date: d };
+    c.poiStep = { status: 'Verified', date: d, type: 'Aadhaar', mode: 'DigiLocker' };
+    c.poaStep = { status: 'Verified', date: d, type: 'Aadhaar', mode: 'DigiLocker' };
+    c.vkycStep = { status: 'Completed', date: d };
+    c.linkActive = false;
+    if (!c.reminders) c.reminders = [];
+    c.reminders.push({ ch: 'System', date: now(), status: 'KYC completed via digital portal' });
+  }
+  if (body.status === 'Pending VKYC' && body.kycType === 'Full KYC') {
+    const d = today();
+    c.panStep = { status: 'Verified', date: d };
+    c.poiStep = { status: 'Verified', date: d, type: 'Aadhaar', mode: 'DigiLocker' };
+    c.poaStep = { status: 'Verified', date: d, type: 'Aadhaar', mode: 'DigiLocker' };
+    c.vkycStep = { status: 'Pending', date: null };
+    if (!c.reminders) c.reminders = [];
+    c.reminders.push({ ch: 'System', date: now(), status: 'Documents submitted — VKYC link generated' });
+  }
   saveDb(db); res.json(c);
 });
 app.post('/api/customers/:id/documents', upload.single('file'), (req, res) => {
