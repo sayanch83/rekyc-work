@@ -28,7 +28,7 @@ const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 const SEED = {
   customers: {
-    'KYC-4528': {
+    'KYC-4528': { risk: 'Medium',
       id: 'KYC-4528', name: 'Rajesh Kumar Sharma', acct: 'XXXX4528',
       mobile: '+91 98765 43210', email: 'rajesh.s***@gmail.com',
       dob: '15 Mar 1985', pan: 'ABCPS****K', aadhaar: 'XXXX XXXX 7842',
@@ -56,7 +56,7 @@ const SEED = {
       source: 'Digital', agent: null, completedDate: null, agentGeo: null,
       documents: [],
     },
-    'KYC-7891': {
+    'KYC-7891': { risk: 'Low',
       id: 'KYC-7891', name: 'Priya Mehta', acct: 'XXXX7891',
       mobile: '+91 87654 32100', email: 'priya.m***@gmail.com',
       dob: '22 Jul 1990', pan: 'BXZPM****R', aadhaar: 'XXXX XXXX 3156',
@@ -84,7 +84,7 @@ const SEED = {
           reviewedBy: 'Auto-verified', reviewDate: '18 Mar 2026', rejectReason: null, fileId: null },
       ],
     },
-    'KYC-3345': {
+    'KYC-3345': { risk: 'Low',
       id: 'KYC-3345', name: 'Amit Patel', acct: 'XXXX3345',
       mobile: '+91 99887 76543', email: 'amit.p***@yahoo.com',
       dob: '08 Nov 1978', pan: 'CDFPP****L', aadhaar: 'XXXX XXXX 9021',
@@ -118,7 +118,7 @@ const SEED = {
           reviewedBy: 'Rakesh Verma', reviewDate: '02 Apr 2026', rejectReason: null, fileId: null },
       ],
     },
-    'KYC-5512': {
+    'KYC-5512': { risk: 'Low',
       id: 'KYC-5512', name: 'Sneha Reddy', acct: 'XXXX5512',
       mobile: '+91 91234 56789', email: 'sneha.r***@outlook.com',
       dob: '14 Apr 1995', pan: 'EFRPS****T', aadhaar: 'XXXX XXXX 6734',
@@ -143,7 +143,7 @@ const SEED = {
       source: 'Digital', agent: null, completedDate: null, agentGeo: null,
       documents: [],
     },
-    'KYC-6678': {
+    'KYC-6678': { risk: 'Medium',
       id: 'KYC-6678', name: 'Vikram Singh', acct: 'XXXX6678',
       mobile: '+91 98123 45678', email: 'vikram.s***@gmail.com',
       dob: '30 Jan 1982', pan: 'GHIPS****M', aadhaar: 'XXXX XXXX 2489',
@@ -169,7 +169,7 @@ const SEED = {
       source: null, agent: null, completedDate: null, agentGeo: null,
       documents: [],
     },
-    'KYC-2290': {
+    'KYC-2290': { risk: 'Low',
       id: 'KYC-2290', name: 'Meera Joshi', acct: 'XXXX2290',
       mobile: '+91 90876 54321', email: 'meera.j***@gmail.com',
       dob: '03 Jun 1988', pan: 'IJKMJ****N', aadhaar: 'XXXX XXXX 8823',
@@ -197,7 +197,7 @@ const SEED = {
           reviewedBy: 'Rakesh Verma', reviewDate: '12 Mar 2026', rejectReason: null, fileId: null },
       ],
     },
-    'KYC-8834': {
+    'KYC-8834': { risk: 'Low',
       id: 'KYC-8834', name: 'Arjun Nair', acct: 'XXXX8834',
       mobile: '+91 94567 89012', email: 'arjun.n***@gmail.com',
       dob: '12 Dec 1992', pan: 'LMNPN****P', aadhaar: 'XXXX XXXX 4421',
@@ -217,7 +217,7 @@ const SEED = {
       source: null, agent: null, completedDate: null, agentGeo: null,
       documents: [],
     },
-    'KYC-1190': {
+    'KYC-1190': { risk: 'Medium',
       id: 'KYC-1190', name: 'Divya Krishnan', acct: 'XXXX1190',
       mobile: '+91 88901 23456', email: 'divya.k***@yahoo.com',
       dob: '25 Sep 1980', pan: 'OPQDK****Q', aadhaar: 'XXXX XXXX 7712',
@@ -251,7 +251,7 @@ const SEED = {
           reviewedBy: null, reviewDate: null, rejectReason: null, fileId: null },
       ],
     },
-    'KYC-9901': {
+    'KYC-9901': { risk: 'High',
       id: 'KYC-9901', name: 'Sanjay Kapoor', acct: 'XXXX9901',
       mobile: '+91 77890 12345', email: 'sanjay.k***@gmail.com',
       dob: '18 Mar 1975', pan: 'RSTSK****R', aadhaar: 'XXXX XXXX 3390',
@@ -282,7 +282,7 @@ const SEED = {
           rejectReason: 'Passport expired on 22 Sep 2024. Please upload a valid ID document.', fileId: null },
       ],
     },
-    'KYC-4421': {
+    'KYC-4421': { risk: 'Low',
       id: 'KYC-4421', name: 'Lakshmi Venkataraman', acct: 'XXXX4421',
       mobile: '+91 96321 54780', email: 'lakshmi.v***@outlook.com',
       dob: '07 Aug 1965', pan: 'UVWLV****S', aadhaar: 'XXXX XXXX 5567',
@@ -314,7 +314,7 @@ const SEED = {
           reviewedBy: 'Rakesh Verma', reviewDate: '29 Mar 2026', rejectReason: null, fileId: null },
       ],
     },
-    'KYC-7723': {
+    'KYC-7723': { risk: 'Medium',
       id: 'KYC-7723', name: 'Rohit Agarwal', acct: 'XXXX7723',
       mobile: '+91 85432 10987', email: 'rohit.a***@gmail.com',
       dob: '29 Feb 1984', pan: 'XYZRA****T', aadhaar: 'XXXX XXXX 1144',
