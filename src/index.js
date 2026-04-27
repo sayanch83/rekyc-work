@@ -647,6 +647,10 @@ app.post('/api/link/validate', (req, res) => {
   const { token, mobile } = req.body;
   if (!token) return res.status(400).json({ error: 'Token required' });
 
+  const dbCheck = loadDb();
+  const allTokens = Object.keys(dbCheck.linkTokens || {});
+  console.log(`Link validate: token=${token.slice(0,8)}... stored tokens=${allTokens.length}`);
+
   const entry = getLinkToken(token);
 
   if (!entry) {
