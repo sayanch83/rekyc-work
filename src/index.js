@@ -16,13 +16,15 @@ const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-// ── Twilio (optional — falls back to demo mode if not configured) ──
+// ── Twilio Verify (optional — falls back to demo mode if not configured) ──
+// Uses Verify Service instead of raw SMS — no phone number purchase needed
 let twilioClient = null;
-if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+const VERIFY_SID = process.env.TWILIO_VERIFY_SID; // starts with VA...
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && VERIFY_SID) {
   try {
     const { default: twilio } = await import('twilio');
     twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    console.log('Twilio: connected');
+    console.log('Twilio Verify: connected — SID', VERIFY_SID);
   } catch(e) { console.warn('Twilio: failed to init —', e.message); }
 } else { console.log('Twilio: not configured — OTP will be demo mode (123456)'); }
 
@@ -54,20 +56,7 @@ if (process.env.SENDGRID_API_KEY) {
   } catch(e) { console.warn('SendGrid: failed to init —', e.message); }
 } else { console.log('SendGrid: not configured — emails disabled'); }
 
-// ── OTP store (in-memory, 5 min TTL, max 3 attempts) ──
-const otpStore = new Map(); // key: mobile → { otp, expires, attempts }
-
-function generateOtp() { return Math.floor(100000 + Math.random() * 900000).toString(); }
-
-async function sendSmsOtp(mobile, otp) {
-  if (!twilioClient) return { demo: true };
-  await twilioClient.messages.create({
-    body: `Your National Bank Re-KYC OTP is: ${otp}. Valid for 5 minutes. Do not share this with anyone.`,
-    from: process.env.TWILIO_PHONE_NUMBER,
-    to: mobile,
-  });
-  return { sent: true };
-}
+// No in-memory OTP store needed — Twilio Verify manages OTP lifecycle server-side
 
 async function sendPushNotification(fcmToken, title, body, data = {}) {
   if (!firebaseAdmin || !fcmToken) return;
@@ -562,76 +551,75 @@ app.post('/api/customers/:id/regen-link', (req, res) => {
   saveDb(db); res.json(c);
 });
 
-// ── OTP: Send ──
+// ── OTP: Send via Twilio Verify ──
 app.post('/api/otp/send', async (req, res) => {
   const { mobile } = req.body;
   if (!mobile) return res.status(400).json({ error: 'Mobile required' });
 
-  // Rate limit: max 1 OTP per 30 seconds
-  const existing = otpStore.get(mobile);
-  if (existing && Date.now() < existing.rateLimitUntil) {
-    const wait = Math.ceil((existing.rateLimitUntil - Date.now()) / 1000);
-    return res.status(429).json({ error: `Please wait ${wait}s before requesting another OTP` });
-  }
-
-  const otp = generateOtp();
-  otpStore.set(mobile, {
-    otp,
-    expires: Date.now() + 5 * 60 * 1000,
-    attempts: 0,
-    rateLimitUntil: Date.now() + 30 * 1000,
-  });
-
-  if (twilioClient) {
+  if (twilioClient && VERIFY_SID) {
     try {
-      await sendSmsOtp(mobile, otp);
-      console.log(`OTP sent via Twilio to ${mobile}`);
-      res.json({ ok: true, via: 'sms' });
+      // Twilio Verify handles rate limiting, expiry, and attempt counting automatically
+      const verification = await twilioClient.verify.v2
+        .services(VERIFY_SID)
+        .verifications.create({ to: mobile, channel: 'sms' });
+      console.log(`Verify OTP sent to ${mobile} — status: ${verification.status}`);
+      res.json({ ok: true, via: 'sms', status: verification.status });
     } catch(e) {
-      console.error('Twilio error:', e.message);
+      console.error('Twilio Verify send error:', e.message);
+      // Handle specific Twilio errors clearly
+      if (e.code === 60200) return res.status(400).json({ error: 'Invalid mobile number format.' });
+      if (e.code === 60203) return res.status(429).json({ error: 'Max OTP attempts reached. Please try again later.' });
       res.status(500).json({ error: 'Failed to send OTP. Please try again.' });
     }
   } else {
-    // Demo mode: log OTP to console, always accept 123456
-    console.log(`[DEMO] OTP for ${mobile}: ${otp} (or use 123456)`);
+    // Demo mode — no Twilio configured
+    console.log(`[DEMO] OTP requested for ${mobile} — use 123456`);
     res.json({ ok: true, via: 'demo', hint: 'Use 123456 in demo mode' });
   }
 });
 
-// ── OTP: Verify ──
-app.post('/api/otp/verify', (req, res) => {
+// ── OTP: Verify via Twilio Verify ──
+app.post('/api/otp/verify', async (req, res) => {
   const { mobile, otp } = req.body;
   if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP required' });
 
-  const record = otpStore.get(mobile);
-
-  // Demo mode: 123456 always works
-  if (!twilioClient && otp === '123456') {
-    return res.json({ ok: true, demo: true });
+  // Demo mode: 123456 always works when Twilio not configured
+  if (!twilioClient || !VERIFY_SID) {
+    if (otp === '123456') return res.json({ ok: true, demo: true });
+    return res.status(400).json({ error: 'Incorrect OTP. (Demo: use 123456)', attemptsLeft: 2 });
   }
 
-  if (!record) return res.status(400).json({ error: 'No OTP found. Please request a new one.' });
-  if (Date.now() > record.expires) {
-    otpStore.delete(mobile);
-    return res.status(400).json({ error: 'OTP has expired. Please request a new one.', expired: true });
-  }
+  try {
+    const check = await twilioClient.verify.v2
+      .services(VERIFY_SID)
+      .verificationChecks.create({ to: mobile, code: otp });
 
-  record.attempts += 1;
-  if (record.attempts > 3) {
-    otpStore.delete(mobile);
-    return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.', locked: true });
+    if (check.status === 'approved') {
+      res.json({ ok: true });
+    } else {
+      // 'pending' means wrong code — Twilio tracks attempts automatically
+      res.status(400).json({
+        error: 'Incorrect OTP. Please check and try again.',
+        attemptsLeft: 2, // Twilio allows 5 attempts before auto-expiry
+      });
+    }
+  } catch(e) {
+    console.error('Twilio Verify check error:', e.message);
+    if (e.code === 60202) {
+      // Max check attempts reached — Twilio expires the verification automatically
+      return res.status(429).json({
+        error: 'Too many incorrect attempts. Please request a new OTP.',
+        locked: true,
+      });
+    }
+    if (e.code === 20404) {
+      return res.status(400).json({
+        error: 'OTP has expired or was already used. Please request a new one.',
+        expired: true,
+      });
+    }
+    res.status(500).json({ error: 'Verification failed. Please try again.' });
   }
-
-  if (record.otp !== otp) {
-    const remaining = 3 - record.attempts;
-    return res.status(400).json({
-      error: `Incorrect OTP. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`,
-      attemptsLeft: remaining,
-    });
-  }
-
-  otpStore.delete(mobile);
-  res.json({ ok: true });
 });
 
 // ── FCM Token: Save ──
@@ -650,7 +638,7 @@ app.post('/api/reset', (_, res) => {
   try { fs.readdirSync(UPLOAD_DIR).forEach(f => fs.unlinkSync(path.join(UPLOAD_DIR, f))); } catch(e) {}
   saveDb(SEED); res.json({ ok: true });
 });
-app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), integrations: { twilio: !!twilioClient, firebase: !!firebaseAdmin, sendgrid: !!sgMail } }); });
+app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), integrations: { twilio_verify: !!(twilioClient && VERIFY_SID), firebase: !!firebaseAdmin, sendgrid: !!sgMail } }); });
 app.get('/', (_, res) => { res.json({ service: 'Re-KYC API', version: '1.0.0' }); });
 
 const PORT = process.env.PORT || 4000;
