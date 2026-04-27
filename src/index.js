@@ -498,8 +498,21 @@ const SEED = {
 };
 
 function loadDb() {
-  if (!fs.existsSync(DB_PATH)) { saveDb(SEED); return JSON.parse(JSON.stringify(SEED)); }
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
+  if (!process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+    console.warn('⚠ RAILWAY_VOLUME_MOUNT_PATH not set — data stored locally and will reset on redeploy');
+  }
+  if (!fs.existsSync(DB_PATH)) {
+    console.log('No db.json found — initialising with seed data');
+    saveDb(SEED);
+    return JSON.parse(JSON.stringify(SEED));
+  }
+  try {
+    return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
+  } catch(e) {
+    console.error('db.json corrupt — resetting to seed:', e.message);
+    saveDb(SEED);
+    return JSON.parse(JSON.stringify(SEED));
+  }
 }
 function saveDb(data) { fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2)); }
 function now() { return new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true }); }
@@ -955,7 +968,7 @@ app.post('/api/reset', (_, res) => {
   try { fs.readdirSync(UPLOAD_DIR).forEach(f => fs.unlinkSync(path.join(UPLOAD_DIR, f))); } catch(e) {}
   saveDb(SEED); res.json({ ok: true });
 });
-app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), integrations: { twilio_verify: !!(twilioClient && VERIFY_SID), firebase: !!firebaseAdmin, sendgrid: !!sgMail, digilocker: dlConfigured } }); });
+app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), volume: process.env.RAILWAY_VOLUME_MOUNT_PATH || 'NOT MOUNTED — data will reset on redeploy', integrations: { twilio_verify: !!(twilioClient && VERIFY_SID), firebase: !!firebaseAdmin, sendgrid: !!sgMail, digilocker: dlConfigured } }); });
 app.get('/', (_, res) => { res.json({ service: 'Re-KYC API', version: '1.0.0' }); });
 
 const PORT = process.env.PORT || 4000;
