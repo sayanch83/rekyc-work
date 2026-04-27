@@ -69,20 +69,34 @@ const dlConfigured = !!(DL_CLIENT_ID && DL_CLIENT_SECRET && DL_REDIRECT_URI);
 console.log(dlConfigured ? 'DigiLocker: configured' : 'DigiLocker: not configured');
 
 // In-memory store for OAuth state → customer mapping (state is a random nonce)
-const dlStateStore = new Map(); // state → { custId, screen, expires }
+const dlStateStore = new Map(); // state → { custId, screen, expires } — OK in-memory (short-lived OAuth)
 
-// ── Link token store — maps token → { custId, mobile, expires } ──
-const linkTokenStore = new Map();
-
+// ── Link tokens persisted to DB so they survive server restarts ──
 function generateLinkToken(custId, mobile) {
-  const token = uuid().replace(/-/g,''); // 32-char hex token
+  const token = uuid().replace(/-/g,'');
   const expires = Date.now() + 3 * 24 * 60 * 60 * 1000; // 3 days
-  linkTokenStore.set(token, { custId, mobile, expires });
-  // Clean up expired tokens opportunistically
-  for (const [t, v] of linkTokenStore) {
-    if (Date.now() > v.expires) linkTokenStore.delete(t);
+  const db = loadDb();
+  if (!db.linkTokens) db.linkTokens = {};
+  // Clean expired tokens while we're here
+  for (const [t, v] of Object.entries(db.linkTokens)) {
+    if (Date.now() > v.expires) delete db.linkTokens[t];
   }
+  db.linkTokens[token] = { custId, mobile, expires };
+  saveDb(db);
   return token;
+}
+
+function getLinkToken(token) {
+  const db = loadDb();
+  return db.linkTokens?.[token] || null;
+}
+
+function deleteLinkToken(token) {
+  const db = loadDb();
+  if (db.linkTokens?.[token]) {
+    delete db.linkTokens[token];
+    saveDb(db);
+  }
 }
 
 function dlAuthUrl(state) {
@@ -633,7 +647,7 @@ app.post('/api/link/validate', (req, res) => {
   const { token, mobile } = req.body;
   if (!token) return res.status(400).json({ error: 'Token required' });
 
-  const entry = linkTokenStore.get(token);
+  const entry = getLinkToken(token);
 
   if (!entry) {
     return res.status(404).json({
@@ -643,14 +657,13 @@ app.post('/api/link/validate', (req, res) => {
   }
 
   if (Date.now() > entry.expires) {
-    linkTokenStore.delete(token);
+    deleteLinkToken(token);
     return res.status(410).json({
       valid: false,
       error: 'This link has expired. Please contact your bank branch for a new link.',
     });
   }
 
-  // If mobile provided, validate it matches
   if (mobile) {
     const tokenMobileDigits = entry.mobile.replace(/\D/g,'');
     const enteredDigits     = mobile.replace(/\D/g,'');
@@ -662,7 +675,6 @@ app.post('/api/link/validate', (req, res) => {
     }
   }
 
-  // Valid — return customer ID so frontend can load the journey
   const db = loadDb();
   const c = db.customers[entry.custId];
   if (!c) return res.status(404).json({ valid: false, error: 'Customer not found.' });
@@ -679,8 +691,8 @@ app.post('/api/link/validate', (req, res) => {
 // Marks token as used so it can't be reused
 app.post('/api/link/consume', (req, res) => {
   const { token } = req.body;
-  if (token && linkTokenStore.has(token)) {
-    linkTokenStore.delete(token);
+  if (token) {
+    deleteLinkToken(token);
     console.log(`Link token consumed: ${token.slice(0,8)}...`);
   }
   res.json({ ok: true });
