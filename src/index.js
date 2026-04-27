@@ -71,6 +71,20 @@ console.log(dlConfigured ? 'DigiLocker: configured' : 'DigiLocker: not configure
 // In-memory store for OAuth state → customer mapping (state is a random nonce)
 const dlStateStore = new Map(); // state → { custId, screen, expires }
 
+// ── Link token store — maps token → { custId, mobile, expires } ──
+const linkTokenStore = new Map();
+
+function generateLinkToken(custId, mobile) {
+  const token = uuid().replace(/-/g,''); // 32-char hex token
+  const expires = Date.now() + 3 * 24 * 60 * 60 * 1000; // 3 days
+  linkTokenStore.set(token, { custId, mobile, expires });
+  // Clean up expired tokens opportunistically
+  for (const [t, v] of linkTokenStore) {
+    if (Date.now() > v.expires) linkTokenStore.delete(t);
+  }
+  return token;
+}
+
 function dlAuthUrl(state) {
   const params = new URLSearchParams({
     response_type: 'code',
@@ -574,27 +588,35 @@ app.post('/api/customers/:id/regen-link', async (req, res) => {
   const expiryDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
     .toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
 
+  // Generate signed token tied to this customer's mobile
+  const token = generateLinkToken(c.id, c.mobile);
+
   c.linkActive = true;
   c.linkExpiry = expiryDate;
+  c.linkToken  = token; // store on record for reference
   c.reminders.push({ ch: 'SMS', date: now(), status: 'Re-KYC link sent via SMS' });
   saveDb(db);
 
-  // Send real SMS via Twilio if configured
   const frontendUrl = process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app';
-  const link = `${frontendUrl}/customer?id=${c.id}`;
-  const msg = `National Bank: Your Re-KYC link is ready. Click to complete your KYC update: ${link} Valid until ${expiryDate}. Do not share this link.`;
+  // Link contains token — NOT the customer ID directly
+  const link = `${frontendUrl}/customer?token=${token}`;
+  const msg = `National Bank: Complete your Re-KYC by clicking the link below. Valid for 3 days.\n${link}\nDo not share this link with anyone.`;
 
-  if (twilioClient && VERIFY_SID && c.mobile) {
+  if (twilioClient && c.mobile) {
     try {
-      await twilioClient.messages.create({
+      const smsParams = {
         body: msg,
-        from: process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_MESSAGING_SERVICE_SID
-          ? process.env.TWILIO_PHONE_NUMBER
-          : undefined,
-        messagingServiceSid: !process.env.TWILIO_PHONE_NUMBER ? process.env.TWILIO_MESSAGING_SERVICE_SID : undefined,
         to: c.mobile,
-      });
-      console.log(`Re-KYC link SMS sent to ${c.mobile}`);
+      };
+      if (process.env.TWILIO_PHONE_NUMBER) {
+        smsParams.from = process.env.TWILIO_PHONE_NUMBER;
+      } else if (process.env.TWILIO_MESSAGING_SERVICE_SID) {
+        smsParams.messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
+      } else {
+        throw new Error('No TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID configured');
+      }
+      await twilioClient.messages.create(smsParams);
+      console.log(`Re-KYC link SMS sent to ${c.mobile} — token: ${token.slice(0,8)}...`);
     } catch(e) {
       console.warn('SMS send failed (link still regenerated):', e.message);
     }
@@ -602,7 +624,66 @@ app.post('/api/customers/:id/regen-link', async (req, res) => {
     console.log(`[DEMO] Re-KYC link for ${c.name}: ${link}`);
   }
 
-  res.json(c);
+  res.json({ ...c, generatedLink: link });
+});
+
+// ── Token validation — called when customer opens link ──
+// Validates token exists, isn't expired, and mobile matches
+app.post('/api/link/validate', (req, res) => {
+  const { token, mobile } = req.body;
+  if (!token) return res.status(400).json({ error: 'Token required' });
+
+  const entry = linkTokenStore.get(token);
+
+  if (!entry) {
+    return res.status(404).json({
+      valid: false,
+      error: 'This link is invalid or has already been used.',
+    });
+  }
+
+  if (Date.now() > entry.expires) {
+    linkTokenStore.delete(token);
+    return res.status(410).json({
+      valid: false,
+      error: 'This link has expired. Please contact your bank branch for a new link.',
+    });
+  }
+
+  // If mobile provided, validate it matches
+  if (mobile) {
+    const tokenMobileDigits = entry.mobile.replace(/\D/g,'');
+    const enteredDigits     = mobile.replace(/\D/g,'');
+    if (tokenMobileDigits !== enteredDigits) {
+      return res.status(403).json({
+        valid: false,
+        error: 'The mobile number you entered does not match the one registered for this link.',
+      });
+    }
+  }
+
+  // Valid — return customer ID so frontend can load the journey
+  const db = loadDb();
+  const c = db.customers[entry.custId];
+  if (!c) return res.status(404).json({ valid: false, error: 'Customer not found.' });
+
+  res.json({
+    valid: true,
+    custId: entry.custId,
+    maskedMobile: entry.mobile.replace(/\D/g,'').replace(/(\d{2})\d+(\d{4})/, '$1XXXXXX$2'),
+    name: c.name,
+  });
+});
+
+// ── Token consume — called after successful OTP auth ──
+// Marks token as used so it can't be reused
+app.post('/api/link/consume', (req, res) => {
+  const { token } = req.body;
+  if (token && linkTokenStore.has(token)) {
+    linkTokenStore.delete(token);
+    console.log(`Link token consumed: ${token.slice(0,8)}...`);
+  }
+  res.json({ ok: true });
 });
 
 // ── OTP: Send via Twilio Verify ──
