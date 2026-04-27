@@ -567,12 +567,42 @@ app.put('/api/customers/:id/documents/:did/review', async (req, res) => {
 
   res.json(doc);
 });
-app.post('/api/customers/:id/regen-link', (req, res) => {
+app.post('/api/customers/:id/regen-link', async (req, res) => {
   const db = loadDb(); const c = db.customers[req.params.id];
   if (!c) return res.status(404).json({ error: 'Not found' });
-  c.linkActive = true; c.linkExpiry = '02 May 2026, 11:59 PM';
-  c.reminders.push({ ch: 'System', date: now() });
-  saveDb(db); res.json(c);
+
+  const expiryDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+    .toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+
+  c.linkActive = true;
+  c.linkExpiry = expiryDate;
+  c.reminders.push({ ch: 'SMS', date: now(), status: 'Re-KYC link sent via SMS' });
+  saveDb(db);
+
+  // Send real SMS via Twilio if configured
+  const frontendUrl = process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app';
+  const link = `${frontendUrl}/customer?id=${c.id}`;
+  const msg = `National Bank: Your Re-KYC link is ready. Click to complete your KYC update: ${link} Valid until ${expiryDate}. Do not share this link.`;
+
+  if (twilioClient && VERIFY_SID && c.mobile) {
+    try {
+      await twilioClient.messages.create({
+        body: msg,
+        from: process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_MESSAGING_SERVICE_SID
+          ? process.env.TWILIO_PHONE_NUMBER
+          : undefined,
+        messagingServiceSid: !process.env.TWILIO_PHONE_NUMBER ? process.env.TWILIO_MESSAGING_SERVICE_SID : undefined,
+        to: c.mobile,
+      });
+      console.log(`Re-KYC link SMS sent to ${c.mobile}`);
+    } catch(e) {
+      console.warn('SMS send failed (link still regenerated):', e.message);
+    }
+  } else {
+    console.log(`[DEMO] Re-KYC link for ${c.name}: ${link}`);
+  }
+
+  res.json(c);
 });
 
 // ── OTP: Send via Twilio Verify ──
@@ -773,6 +803,55 @@ app.post('/api/customers/:id/fcm-token', (req, res) => {
   saveDb(db);
   console.log(`FCM token saved for customer ${req.params.id}`);
   res.json({ ok: true });
+});
+
+// ── Bulk: Create single customer record ──
+app.post('/api/customers/bulk', (req, res) => {
+  const db = loadDb();
+  const body = req.body;
+  if (!body.id || !body.name || !body.mobile) {
+    return res.status(400).json({ error: 'id, name, mobile required' });
+  }
+  // Check for duplicate by ID
+  if (db.customers[body.id]) {
+    return res.status(409).json({ error: `Customer ${body.id} already exists` });
+  }
+  // Check for duplicate mobile
+  const existingByMobile = Object.values(db.customers).find((c: any) =>
+    c.mobile?.replace(/\D/g,'') === body.mobile?.replace(/\D/g,'')
+  );
+  if (existingByMobile) {
+    return res.status(409).json({ error: `Mobile ${body.mobile} already registered` });
+  }
+  db.customers[body.id] = {
+    ...body,
+    id: body.id,
+    reminders: body.reminders || [],
+    documents: body.documents || [],
+    docsOnFile: body.docsOnFile || [],
+  };
+  saveDb(db);
+  console.log(`Bulk: created customer ${body.id} — ${body.name}`);
+  res.json(db.customers[body.id]);
+});
+
+
+app.post('/api/demo/config', (req, res) => {
+  const db = loadDb();
+  const { custId = 'KYC-4528', ...updates } = req.body;
+  const c = db.customers[custId];
+  if (!c) return res.status(404).json({ error: `Customer ${custId} not found` });
+  Object.assign(c, updates);
+  saveDb(db);
+  console.log(`Demo config updated for ${custId}:`, Object.keys(updates).join(', '));
+  res.json({ ok: true, customer: { id: c.id, name: c.name, mobile: c.mobile, email: c.email, due: c.due } });
+});
+
+app.get('/api/demo/config/:custId', (req, res) => {
+  const db = loadDb();
+  const c = db.customers[req.params.custId];
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  res.json({ id: c.id, name: c.name, mobile: c.mobile, email: c.email, due: c.due, status: c.status, risk: c.risk });
 });
 
 app.post('/api/reset', (_, res) => {
