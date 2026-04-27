@@ -7,12 +7,35 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOAD_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH
-  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'uploads')
-  : path.join(__dirname, '..', 'uploads');
-const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
-  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'db.json')
-  : path.join(__dirname, '..', 'db.json');
+
+// ── Robust DB path detection ──
+// Try Railway volume first, then /data directly, then local
+function resolveDataDir() {
+  const candidates = [
+    process.env.RAILWAY_VOLUME_MOUNT_PATH,
+    '/data',
+    path.join(__dirname, '..'),
+  ].filter(Boolean);
+
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      // Test write access
+      const testFile = path.join(dir, '.write-test');
+      fs.writeFileSync(testFile, 'ok');
+      fs.unlinkSync(testFile);
+      console.log(`Data directory: ${dir}`);
+      return dir;
+    } catch(e) {
+      console.log(`Data dir ${dir} not writable: ${e.message}`);
+    }
+  }
+  throw new Error('No writable data directory found');
+}
+
+const DATA_DIR  = resolveDataDir();
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+const DB_PATH    = path.join(DATA_DIR, 'db.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -497,11 +520,8 @@ const SEED = {
 };
 
 function loadDb() {
-  if (!process.env.RAILWAY_VOLUME_MOUNT_PATH) {
-    console.warn('⚠ RAILWAY_VOLUME_MOUNT_PATH not set — data stored locally and will reset on redeploy');
-  }
   if (!fs.existsSync(DB_PATH)) {
-    console.log('No db.json found — initialising with seed data');
+    console.log(`Initialising db.json at ${DB_PATH}`);
     saveDb(SEED);
     return JSON.parse(JSON.stringify(SEED));
   }
@@ -630,24 +650,23 @@ app.post('/api/customers/:id/regen-link', async (req, res) => {
 
   if (twilioClient && c.mobile) {
     try {
-      const smsParams = {
-        body: msg,
-        to: c.mobile,
-      };
+      const smsParams = { body: msg, to: c.mobile };
       if (process.env.TWILIO_PHONE_NUMBER) {
         smsParams.from = process.env.TWILIO_PHONE_NUMBER;
       } else if (process.env.TWILIO_MESSAGING_SERVICE_SID) {
         smsParams.messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
       } else {
-        throw new Error('No TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID configured');
+        throw new Error('No TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID set in Railway variables');
       }
-      await twilioClient.messages.create(smsParams);
-      console.log(`Re-KYC link SMS sent to ${c.mobile} — token: ${token.slice(0,8)}...`);
+      console.log(`Sending SMS to ${c.mobile} from ${smsParams.from || smsParams.messagingServiceSid}`);
+      const msg_result = await twilioClient.messages.create(smsParams);
+      console.log(`SMS sent — SID: ${msg_result.sid}, status: ${msg_result.status}`);
     } catch(e) {
-      console.warn('SMS send failed (link still regenerated):', e.message);
+      console.error('SMS FAILED:', e.message, e.code || '');
     }
   } else {
-    console.log(`[DEMO] Re-KYC link for ${c.name}: ${link}`);
+    console.log(`[DEMO] SMS not sent — twilioClient=${!!twilioClient}, mobile=${c.mobile}`);
+    console.log(`[DEMO] Link: ${link}`);
   }
 
   res.json({ ...c, generatedLink: link });
@@ -967,7 +986,7 @@ app.post('/api/reset', (_, res) => {
   try { fs.readdirSync(UPLOAD_DIR).forEach(f => fs.unlinkSync(path.join(UPLOAD_DIR, f))); } catch(e) {}
   saveDb(SEED); res.json({ ok: true });
 });
-app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), volume: process.env.RAILWAY_VOLUME_MOUNT_PATH || 'NOT MOUNTED — data will reset on redeploy', integrations: { twilio_otp: !!(twilioClient && VERIFY_SID), twilio_sms: !!(twilioClient && (process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_MESSAGING_SERVICE_SID)), firebase: !!firebaseAdmin, sendgrid: !!sgMail, digilocker: dlConfigured } }); });
+app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), dataDir: DATA_DIR, dbExists: fs.existsSync(DB_PATH), integrations: { twilio_otp: !!(twilioClient && VERIFY_SID), twilio_sms: !!(twilioClient && (process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_MESSAGING_SERVICE_SID)), firebase: !!firebaseAdmin, sendgrid: !!sgMail, digilocker: dlConfigured } }); });
 app.get('/', (_, res) => { res.json({ service: 'Re-KYC API', version: '1.0.0' }); });
 
 const PORT = process.env.PORT || 4000;
