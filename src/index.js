@@ -16,17 +16,16 @@ const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-// ── Twilio Verify (optional — falls back to demo mode if not configured) ──
-// Uses Verify Service instead of raw SMS — no phone number purchase needed
+// ── Twilio client (optional — needs ACCOUNT_SID + AUTH_TOKEN) ──
 let twilioClient = null;
-const VERIFY_SID = process.env.TWILIO_VERIFY_SID; // starts with VA...
-if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && VERIFY_SID) {
+const VERIFY_SID = process.env.TWILIO_VERIFY_SID; // starts with VA... (needed for OTP only)
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
   try {
     const { default: twilio } = await import('twilio');
     twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    console.log('Twilio Verify: connected — SID', VERIFY_SID);
+    console.log(`Twilio: connected — Verify: ${VERIFY_SID ? 'yes' : 'no'}, SMS: ${process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_MESSAGING_SERVICE_SID ? 'yes' : 'no'}`);
   } catch(e) { console.warn('Twilio: failed to init —', e.message); }
-} else { console.log('Twilio: not configured — OTP will be demo mode (123456)'); }
+} else { console.log('Twilio: not configured — OTP demo mode, SMS links disabled'); }
 
 // ── Firebase Admin (optional) ──
 let firebaseAdmin = null;
@@ -968,7 +967,7 @@ app.post('/api/reset', (_, res) => {
   try { fs.readdirSync(UPLOAD_DIR).forEach(f => fs.unlinkSync(path.join(UPLOAD_DIR, f))); } catch(e) {}
   saveDb(SEED); res.json({ ok: true });
 });
-app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), volume: process.env.RAILWAY_VOLUME_MOUNT_PATH || 'NOT MOUNTED — data will reset on redeploy', integrations: { twilio_verify: !!(twilioClient && VERIFY_SID), firebase: !!firebaseAdmin, sendgrid: !!sgMail, digilocker: dlConfigured } }); });
+app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), volume: process.env.RAILWAY_VOLUME_MOUNT_PATH || 'NOT MOUNTED — data will reset on redeploy', integrations: { twilio_otp: !!(twilioClient && VERIFY_SID), twilio_sms: !!(twilioClient && (process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_MESSAGING_SERVICE_SID)), firebase: !!firebaseAdmin, sendgrid: !!sgMail, digilocker: dlConfigured } }); });
 app.get('/', (_, res) => { res.json({ service: 'Re-KYC API', version: '1.0.0' }); });
 
 const PORT = process.env.PORT || 4000;
