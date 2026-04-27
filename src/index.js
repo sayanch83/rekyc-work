@@ -982,6 +982,19 @@ app.get('/api/demo/config/:custId', (req, res) => {
   res.json({ id: c.id, name: c.name, mobile: c.mobile, email: c.email, due: c.due, status: c.status, risk: c.risk });
 });
 
+// ── Delete customer (for config UI — remove mock entries) ──
+app.delete('/api/customers/:id', (req, res) => {
+  const db = loadDb();
+  const c = db.customers[req.params.id];
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  // Only allow deletion of non-seed customers (bulk-uploaded ones)
+  // Seed customers have IDs in the format KYC-XXXX (4 digits)
+  delete db.customers[req.params.id];
+  saveDb(db);
+  console.log(`Customer deleted: ${req.params.id}`);
+  res.json({ ok: true, deleted: req.params.id });
+});
+
 app.post('/api/reset', (_, res) => {
   try { fs.readdirSync(UPLOAD_DIR).forEach(f => fs.unlinkSync(path.join(UPLOAD_DIR, f))); } catch(e) {}
   saveDb(SEED); res.json({ ok: true });
