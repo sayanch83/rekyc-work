@@ -817,7 +817,7 @@ app.post('/api/customers/bulk', (req, res) => {
     return res.status(409).json({ error: `Customer ${body.id} already exists` });
   }
   // Check for duplicate mobile
-  const existingByMobile = Object.values(db.customers).find((c: any) =>
+  const existingByMobile = Object.values(db.customers).find((c) =>
     c.mobile?.replace(/\D/g,'') === body.mobile?.replace(/\D/g,'')
   );
   if (existingByMobile) {
