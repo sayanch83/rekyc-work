@@ -16,6 +16,120 @@ const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+// ── Twilio (optional — falls back to demo mode if not configured) ──
+let twilioClient = null;
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+  try {
+    const { default: twilio } = await import('twilio');
+    twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    console.log('Twilio: connected');
+  } catch(e) { console.warn('Twilio: failed to init —', e.message); }
+} else { console.log('Twilio: not configured — OTP will be demo mode (123456)'); }
+
+// ── Firebase Admin (optional) ──
+let firebaseAdmin = null;
+if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+  try {
+    const { default: admin } = await import('firebase-admin');
+    if (!admin.apps.length) {
+      admin.initializeApp({ credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      })});
+    }
+    firebaseAdmin = admin;
+    console.log('Firebase: connected');
+  } catch(e) { console.warn('Firebase: failed to init —', e.message); }
+} else { console.log('Firebase: not configured — push notifications disabled'); }
+
+// ── SendGrid (optional) ──
+let sgMail = null;
+if (process.env.SENDGRID_API_KEY) {
+  try {
+    const sg = await import('@sendgrid/mail');
+    sgMail = sg.default;
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+    console.log('SendGrid: connected');
+  } catch(e) { console.warn('SendGrid: failed to init —', e.message); }
+} else { console.log('SendGrid: not configured — emails disabled'); }
+
+// ── OTP store (in-memory, 5 min TTL, max 3 attempts) ──
+const otpStore = new Map(); // key: mobile → { otp, expires, attempts }
+
+function generateOtp() { return Math.floor(100000 + Math.random() * 900000).toString(); }
+
+async function sendSmsOtp(mobile, otp) {
+  if (!twilioClient) return { demo: true };
+  await twilioClient.messages.create({
+    body: `Your National Bank Re-KYC OTP is: ${otp}. Valid for 5 minutes. Do not share this with anyone.`,
+    from: process.env.TWILIO_PHONE_NUMBER,
+    to: mobile,
+  });
+  return { sent: true };
+}
+
+async function sendPushNotification(fcmToken, title, body, data = {}) {
+  if (!firebaseAdmin || !fcmToken) return;
+  try {
+    await firebaseAdmin.messaging().send({ token: fcmToken, notification: { title, body }, data });
+  } catch(e) { console.warn('FCM send failed:', e.message); }
+}
+
+async function sendEmail(to, subject, html) {
+  if (!sgMail || !to) return;
+  try {
+    await sgMail.send({
+      to, from: process.env.SENDGRID_FROM || 'rekyc@nationalbank.co.in',
+      subject, html,
+    });
+  } catch(e) { console.warn('SendGrid send failed:', e.message); }
+}
+
+function ackEmailHtml(custName, custId, kycType, ref) {
+  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+  <div style="background:#074994;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0">
+    <h2 style="margin:0;font-size:20px">National Bank Ltd.</h2>
+    <p style="margin:4px 0 0;opacity:.8;font-size:13px">KYC Update — Acknowledgement</p>
+  </div>
+  <div style="background:#fff;padding:24px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px">
+    <p>Dear <strong>${custName}</strong>,</p>
+    <p>Your KYC update has been received and is currently under review.</p>
+    <div style="background:#f0f4f8;border-left:4px solid #074994;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0">
+      <strong>Reference: ${ref}</strong>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin:16px 0">
+      <tr><td style="padding:8px 0;color:#666;border-bottom:1px solid #eee">Customer ID</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right">${custId}</td></tr>
+      <tr><td style="padding:8px 0;color:#666;border-bottom:1px solid #eee">KYC Type</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right">${kycType}</td></tr>
+      <tr><td style="padding:8px 0;color:#666">Expected TAT</td><td style="padding:8px 0;text-align:right">2–3 working days</td></tr>
+    </table>
+    <p style="color:#666;font-size:13px">You will receive another email once your KYC has been verified. Your pre-approved reward will be credited upon successful verification.</p>
+    <p style="color:#999;font-size:11px;margin-top:24px">This is a system-generated email. Please do not reply to this message.</p>
+  </div>
+  </div>`;
+}
+
+function rejectionEmailHtml(custName, docName, reason, custId) {
+  const link = `https://nationalbank.co.in/rekyc?id=${custId}`;
+  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+  <div style="background:#900909;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0">
+    <h2 style="margin:0;font-size:20px">Action Required</h2>
+    <p style="margin:4px 0 0;opacity:.8;font-size:13px">Document Rejected — Re-upload Required</p>
+  </div>
+  <div style="background:#fff;padding:24px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px">
+    <p>Dear <strong>${custName}</strong>,</p>
+    <p>Your document <strong>${docName}</strong> was reviewed and could not be accepted.</p>
+    <div style="background:#fde8e8;border-left:4px solid #900909;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0">
+      <strong style="color:#900909">Rejection Reason:</strong><br>
+      <span style="color:#333">${reason || 'Document could not be verified. Please upload a clearer copy.'}</span>
+    </div>
+    <p>Please re-upload a valid copy to continue your KYC process:</p>
+    <a href="${link}" style="display:inline-block;background:#074994;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">Re-upload Document</a>
+    <p style="color:#999;font-size:11px;margin-top:24px">This is a system-generated email. Please do not reply to this message.</p>
+  </div>
+  </div>`;
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -354,13 +468,11 @@ loadDb();
 
 app.get('/api/customers', (_, res) => { const db = loadDb(); res.json(Object.values(db.customers)); });
 app.get('/api/customers/:id', (req, res) => { const db = loadDb(); const c = db.customers[req.params.id]; if (!c) return res.status(404).json({ error: 'Not found' }); res.json(c); });
-app.put('/api/customers/:id', (req, res) => {
+app.put('/api/customers/:id', async (req, res) => {
   const db = loadDb(); const c = db.customers[req.params.id];
   if (!c) return res.status(404).json({ error: 'Not found' });
   const body = req.body;
-  // Merge fields
   Object.assign(c, body);
-  // When status changes to Completed, update verification steps
   if (body.status === 'Completed' && body.kycType) {
     const d = today();
     c.panStep = { status: 'Verified', date: d };
@@ -370,6 +482,8 @@ app.put('/api/customers/:id', (req, res) => {
     c.linkActive = false;
     if (!c.reminders) c.reminders = [];
     c.reminders.push({ ch: 'System', date: now(), status: 'KYC completed via digital portal' });
+    const ref = `KYC-2026-${c.acct.slice(-4)}`;
+    await sendEmail(c.email, `National Bank: KYC Submitted — ${ref}`, ackEmailHtml(c.name, c.id, body.kycType, ref));
   }
   if (body.status === 'Pending VKYC' && body.kycType === 'Full KYC') {
     const d = today();
@@ -379,6 +493,8 @@ app.put('/api/customers/:id', (req, res) => {
     c.vkycStep = { status: 'Pending', date: null };
     if (!c.reminders) c.reminders = [];
     c.reminders.push({ ch: 'System', date: now(), status: 'Documents submitted — VKYC link generated' });
+    const ref = `KYC-2026-${c.acct.slice(-4)}`;
+    await sendEmail(c.email, `National Bank: Documents Received — VKYC Pending`, ackEmailHtml(c.name, c.id, body.kycType, ref));
   }
   saveDb(db); res.json(c);
 });
@@ -399,7 +515,7 @@ app.get('/api/files/:fileId', (req, res) => {
   if (!fs.existsSync(fp)) return res.status(404).json({ error: 'File not found' });
   res.sendFile(fp);
 });
-app.put('/api/customers/:id/documents/:did/review', (req, res) => {
+app.put('/api/customers/:id/documents/:did/review', async (req, res) => {
   const db = loadDb(); const c = db.customers[req.params.id];
   if (!c) return res.status(404).json({ error: 'Not found' });
   const doc = c.documents.find(d => d.id === req.params.did);
@@ -408,13 +524,35 @@ app.put('/api/customers/:id/documents/:did/review', (req, res) => {
   doc.status = action === 'approve' ? 'approved' : 'rejected';
   doc.reviewedBy = reviewer || 'Bank Officer';
   doc.reviewDate = today();
-  if (action === 'reject') {
-    doc.rejectReason = reason || '';
-    c.reminders.push({ ch: 'System', date: now() });
+  if (action === 'reject') doc.rejectReason = reason || '';
+  c.reminders.push({ ch: 'System', date: now(), status: action === 'approve' ? 'Document approved' : 'Document rejected' });
+  saveDb(db);
+
+  // ── Push notification ──
+  const fcmToken = db.fcmTokens?.[c.id];
+  if (action === 'approve') {
+    await sendPushNotification(fcmToken,
+      `Document Approved ✓`,
+      `Your ${doc.name} has been verified by National Bank.`,
+      { action: 'approved', custId: c.id }
+    );
+    await sendEmail(c.email,
+      `National Bank: ${doc.name} Approved`,
+      ackEmailHtml(c.name, c.id, c.kycType || 'KYC Update', `KYC-2026-${c.acct.slice(-4)}`)
+    );
   } else {
-    c.reminders.push({ ch: 'System', date: now() });
+    await sendPushNotification(fcmToken,
+      `Action Required: Document Rejected`,
+      `Your ${doc.name} was not accepted. Tap to re-upload.`,
+      { action: 'rejected', custId: c.id, docId: doc.id }
+    );
+    await sendEmail(c.email,
+      `Action Required: Re-upload ${doc.name}`,
+      rejectionEmailHtml(c.name, doc.name, reason, c.id)
+    );
   }
-  saveDb(db); res.json(doc);
+
+  res.json(doc);
 });
 app.post('/api/customers/:id/regen-link', (req, res) => {
   const db = loadDb(); const c = db.customers[req.params.id];
@@ -423,11 +561,96 @@ app.post('/api/customers/:id/regen-link', (req, res) => {
   c.reminders.push({ ch: 'System', date: now() });
   saveDb(db); res.json(c);
 });
+
+// ── OTP: Send ──
+app.post('/api/otp/send', async (req, res) => {
+  const { mobile } = req.body;
+  if (!mobile) return res.status(400).json({ error: 'Mobile required' });
+
+  // Rate limit: max 1 OTP per 30 seconds
+  const existing = otpStore.get(mobile);
+  if (existing && Date.now() < existing.rateLimitUntil) {
+    const wait = Math.ceil((existing.rateLimitUntil - Date.now()) / 1000);
+    return res.status(429).json({ error: `Please wait ${wait}s before requesting another OTP` });
+  }
+
+  const otp = generateOtp();
+  otpStore.set(mobile, {
+    otp,
+    expires: Date.now() + 5 * 60 * 1000,
+    attempts: 0,
+    rateLimitUntil: Date.now() + 30 * 1000,
+  });
+
+  if (twilioClient) {
+    try {
+      await sendSmsOtp(mobile, otp);
+      console.log(`OTP sent via Twilio to ${mobile}`);
+      res.json({ ok: true, via: 'sms' });
+    } catch(e) {
+      console.error('Twilio error:', e.message);
+      res.status(500).json({ error: 'Failed to send OTP. Please try again.' });
+    }
+  } else {
+    // Demo mode: log OTP to console, always accept 123456
+    console.log(`[DEMO] OTP for ${mobile}: ${otp} (or use 123456)`);
+    res.json({ ok: true, via: 'demo', hint: 'Use 123456 in demo mode' });
+  }
+});
+
+// ── OTP: Verify ──
+app.post('/api/otp/verify', (req, res) => {
+  const { mobile, otp } = req.body;
+  if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP required' });
+
+  const record = otpStore.get(mobile);
+
+  // Demo mode: 123456 always works
+  if (!twilioClient && otp === '123456') {
+    return res.json({ ok: true, demo: true });
+  }
+
+  if (!record) return res.status(400).json({ error: 'No OTP found. Please request a new one.' });
+  if (Date.now() > record.expires) {
+    otpStore.delete(mobile);
+    return res.status(400).json({ error: 'OTP has expired. Please request a new one.', expired: true });
+  }
+
+  record.attempts += 1;
+  if (record.attempts > 3) {
+    otpStore.delete(mobile);
+    return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.', locked: true });
+  }
+
+  if (record.otp !== otp) {
+    const remaining = 3 - record.attempts;
+    return res.status(400).json({
+      error: `Incorrect OTP. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`,
+      attemptsLeft: remaining,
+    });
+  }
+
+  otpStore.delete(mobile);
+  res.json({ ok: true });
+});
+
+// ── FCM Token: Save ──
+app.post('/api/customers/:id/fcm-token', (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Token required' });
+  const db = loadDb();
+  if (!db.fcmTokens) db.fcmTokens = {};
+  db.fcmTokens[req.params.id] = token;
+  saveDb(db);
+  console.log(`FCM token saved for customer ${req.params.id}`);
+  res.json({ ok: true });
+});
+
 app.post('/api/reset', (_, res) => {
   try { fs.readdirSync(UPLOAD_DIR).forEach(f => fs.unlinkSync(path.join(UPLOAD_DIR, f))); } catch(e) {}
   saveDb(SEED); res.json({ ok: true });
 });
-app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString() }); });
+app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), integrations: { twilio: !!twilioClient, firebase: !!firebaseAdmin, sendgrid: !!sgMail } }); });
 app.get('/', (_, res) => { res.json({ service: 'Re-KYC API', version: '1.0.0' }); });
 
 const PORT = process.env.PORT || 4000;
