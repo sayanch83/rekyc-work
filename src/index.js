@@ -56,7 +56,31 @@ if (process.env.SENDGRID_API_KEY) {
   } catch(e) { console.warn('SendGrid: failed to init —', e.message); }
 } else { console.log('SendGrid: not configured — emails disabled'); }
 
-// No in-memory OTP store needed — Twilio Verify manages OTP lifecycle server-side
+// ── DigiLocker OAuth ──
+const DL_CLIENT_ID     = process.env.DIGILOCKER_CLIENT_ID     || '';
+const DL_CLIENT_SECRET = process.env.DIGILOCKER_CLIENT_SECRET || '';
+const DL_REDIRECT_URI  = process.env.DIGILOCKER_REDIRECT_URI  || '';
+// DigiLocker sandbox vs production
+const DL_BASE = process.env.DIGILOCKER_ENV === 'production'
+  ? 'https://api.digitallocker.gov.in'
+  : 'https://sandbox.digitallocker.gov.in';
+
+const dlConfigured = !!(DL_CLIENT_ID && DL_CLIENT_SECRET && DL_REDIRECT_URI);
+console.log(dlConfigured ? 'DigiLocker: configured' : 'DigiLocker: not configured');
+
+// In-memory store for OAuth state → customer mapping (state is a random nonce)
+const dlStateStore = new Map(); // state → { custId, screen, expires }
+
+function dlAuthUrl(state) {
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: DL_CLIENT_ID,
+    redirect_uri: DL_REDIRECT_URI,
+    state,
+    scope: 'openid',
+  });
+  return `${DL_BASE}/public/oauth2/1/authorize?${params}`;
+}
 
 async function sendPushNotification(fcmToken, title, body, data = {}) {
   if (!firebaseAdmin || !fcmToken) return;
@@ -572,9 +596,9 @@ app.post('/api/otp/send', async (req, res) => {
       res.status(500).json({ error: 'Failed to send OTP. Please try again.' });
     }
   } else {
-    // Demo mode — no Twilio configured
-    console.log(`[DEMO] OTP requested for ${mobile} — use 123456`);
-    res.json({ ok: true, via: 'demo', hint: 'Use 123456 in demo mode' });
+    // Demo mode — no Twilio configured, silently accept any 6-digit code
+    console.log(`[DEMO] OTP requested for ${mobile} — Twilio not configured`);
+    res.json({ ok: true, via: 'demo' });
   }
 });
 
@@ -583,10 +607,10 @@ app.post('/api/otp/verify', async (req, res) => {
   const { mobile, otp } = req.body;
   if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP required' });
 
-  // Demo mode: 123456 always works when Twilio not configured
+  // Demo mode: any 6-digit code works when Twilio not configured
   if (!twilioClient || !VERIFY_SID) {
-    if (otp === '123456') return res.json({ ok: true, demo: true });
-    return res.status(400).json({ error: 'Incorrect OTP. (Demo: use 123456)', attemptsLeft: 2 });
+    if (otp.length === 6) return res.json({ ok: true, demo: true });
+    return res.status(400).json({ error: 'Please enter a valid 6-digit OTP.', attemptsLeft: 2 });
   }
 
   try {
@@ -622,7 +646,124 @@ app.post('/api/otp/verify', async (req, res) => {
   }
 });
 
-// ── FCM Token: Save ──
+// ── DigiLocker: Initiate OAuth ──
+app.get('/api/digilocker/init', (req, res) => {
+  const custId = req.query.custId;
+  if (!custId) return res.status(400).json({ error: 'custId required' });
+
+  if (!dlConfigured) {
+    return res.status(503).json({ error: 'DigiLocker not configured', demo: true });
+  }
+
+  // Generate random state nonce (CSRF protection)
+  const state = uuid().replace(/-/g, '');
+  dlStateStore.set(state, {
+    custId,
+    expires: Date.now() + 10 * 60 * 1000, // 10 min
+  });
+
+  const authUrl = dlAuthUrl(state);
+  res.json({ ok: true, authUrl });
+});
+
+// ── DigiLocker: OAuth Callback (browser redirect) ──
+app.get('/api/digilocker/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+
+  if (error) {
+    return res.redirect(`${process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app'}/customer?dl_error=${error}`);
+  }
+
+  const stateData = dlStateStore.get(state);
+  if (!stateData || Date.now() > stateData.expires) {
+    return res.redirect(`${process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app'}/customer?dl_error=invalid_state`);
+  }
+  dlStateStore.delete(state);
+
+  const { custId } = stateData;
+
+  try {
+    // Exchange code for access token
+    const tokenRes = await fetch(`${DL_BASE}/public/oauth2/1/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        grant_type: 'authorization_code',
+        client_id: DL_CLIENT_ID,
+        client_secret: DL_CLIENT_SECRET,
+        redirect_uri: DL_REDIRECT_URI,
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) throw new Error('No access token: ' + JSON.stringify(tokenData));
+
+    const accessToken = tokenData.access_token;
+
+    // Fetch Aadhaar eKYC data
+    const eKycRes = await fetch(`${DL_BASE}/public/oauth2/1/xml/eaadhaar`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const eKycXml = await eKycRes.text();
+
+    // Parse key fields from Aadhaar XML
+    const getName  = (xml) => xml.match(/<name>([^<]+)<\/name>/i)?.[1] || xml.match(/name="([^"]+)"/i)?.[1] || '';
+    const getDob   = (xml) => xml.match(/<dob>([^<]+)<\/dob>/i)?.[1]  || xml.match(/dob="([^"]+)"/i)?.[1]  || '';
+    const getGender= (xml) => xml.match(/<gender>([^<]+)<\/gender>/i)?.[1] || xml.match(/gender="([^"]+)"/i)?.[1] || '';
+    const getAddr  = (xml) => xml.match(/<address>([^<]+)<\/address>/i)?.[1] || '';
+
+    const aadhaarData = {
+      name:   getName(eKycXml),
+      dob:    getDob(eKycXml),
+      gender: getGender(eKycXml),
+      address: getAddr(eKycXml),
+      verifiedAt: new Date().toISOString(),
+      source: 'DigiLocker',
+    };
+
+    // Save verified data to customer record
+    const db = loadDb();
+    const c = db.customers[custId];
+    if (c) {
+      c.digilockerVerified = aadhaarData;
+      c.poiStep = { status: 'Verified', date: today(), type: 'Aadhaar', mode: 'DigiLocker' };
+      c.poaStep = { status: 'Verified', date: today(), type: 'Aadhaar', mode: 'DigiLocker' };
+      if (!c.reminders) c.reminders = [];
+      c.reminders.push({ ch: 'System', date: now(), status: 'Aadhaar verified via DigiLocker' });
+      saveDb(db);
+    }
+
+    console.log(`DigiLocker: Aadhaar verified for customer ${custId} — ${aadhaarData.name}`);
+
+    // Redirect back to customer portal with success flag
+    res.redirect(`${process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app'}/customer?dl_verified=${custId}&custId=${custId}`);
+
+  } catch(e) {
+    console.error('DigiLocker callback error:', e.message);
+    res.redirect(`${process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app'}/customer?dl_error=fetch_failed&custId=${custId}`);
+  }
+});
+
+// ── DigiLocker: Check verification status ──
+app.get('/api/digilocker/status/:custId', (req, res) => {
+  const db = loadDb();
+  const c = db.customers[req.params.custId];
+  if (!c) return res.status(404).json({ error: 'Not found' });
+
+  if (c.digilockerVerified) {
+    res.json({
+      verified: true,
+      name:   c.digilockerVerified.name,
+      dob:    c.digilockerVerified.dob,
+      gender: c.digilockerVerified.gender,
+      verifiedAt: c.digilockerVerified.verifiedAt,
+    });
+  } else {
+    res.json({ verified: false });
+  }
+});
+
+
 app.post('/api/customers/:id/fcm-token', (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token required' });
@@ -638,7 +779,7 @@ app.post('/api/reset', (_, res) => {
   try { fs.readdirSync(UPLOAD_DIR).forEach(f => fs.unlinkSync(path.join(UPLOAD_DIR, f))); } catch(e) {}
   saveDb(SEED); res.json({ ok: true });
 });
-app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), integrations: { twilio_verify: !!(twilioClient && VERIFY_SID), firebase: !!firebaseAdmin, sendgrid: !!sgMail } }); });
+app.get('/health', (_, res) => { res.json({ status: 'ok', service: 'rekyc-api', timestamp: new Date().toISOString(), integrations: { twilio_verify: !!(twilioClient && VERIFY_SID), firebase: !!firebaseAdmin, sendgrid: !!sgMail, digilocker: dlConfigured } }); });
 app.get('/', (_, res) => { res.json({ service: 'Re-KYC API', version: '1.0.0' }); });
 
 const PORT = process.env.PORT || 4000;
