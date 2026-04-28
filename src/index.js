@@ -628,19 +628,22 @@ app.put('/api/customers/:id/documents/:did/review', async (req, res) => {
   res.json(doc);
 });
 app.post('/api/customers/:id/regen-link', async (req, res) => {
-  const db = loadDb(); const c = db.customers[req.params.id];
+  let db = loadDb();
+  const c = db.customers[req.params.id];
   if (!c) return res.status(404).json({ error: 'Not found' });
 
   const expiryDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
     .toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
 
-  // Generate signed token tied to this customer's mobile
+  // Generate token FIRST — this saves to DB internally
   const token = generateLinkToken(c.id, c.mobile);
 
-  c.linkActive = true;
-  c.linkExpiry = expiryDate;
-  c.linkToken  = token; // store on record for reference
-  c.reminders.push({ ch: 'SMS', date: now(), status: 'Re-KYC link sent via SMS' });
+  // Reload db AFTER generateLinkToken so we don't overwrite the saved token
+  db = loadDb();
+  db.customers[req.params.id].linkActive = true;
+  db.customers[req.params.id].linkExpiry = expiryDate;
+  db.customers[req.params.id].linkToken  = token;
+  db.customers[req.params.id].reminders.push({ ch: 'SMS', date: now(), status: 'Re-KYC link sent via SMS' });
   saveDb(db);
 
   const frontendUrl = process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app';
