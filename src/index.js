@@ -1004,3 +1004,4 @@ app.get('/', (_, res) => { res.json({ service: 'Re-KYC API', version: '1.0.0' })
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Re-KYC API running → port ${PORT}`));
+
