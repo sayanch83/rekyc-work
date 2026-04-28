@@ -674,6 +674,19 @@ app.post('/api/customers/:id/regen-link', async (req, res) => {
 
 // ── Token validation — called when customer opens link ──
 // Validates token exists, isn't expired, and mobile matches
+app.get('/api/debug/tokens', (_, res) => {
+  const db = loadDb();
+  const tokens = db.linkTokens || {};
+  const summary = Object.entries(tokens).map(([t, v]) => ({
+    token: t.slice(0,8) + '...',
+    custId: v.custId,
+    mobile: v.mobile,
+    expires: new Date(v.expires).toISOString(),
+    valid: Date.now() < v.expires,
+  }));
+  res.json({ count: summary.length, dataDir: DATA_DIR, dbPath: DB_PATH, tokens: summary });
+});
+
 app.post('/api/link/validate', (req, res) => {
   const { token, mobile } = req.body;
   if (!token) return res.status(400).json({ error: 'Token required' });
