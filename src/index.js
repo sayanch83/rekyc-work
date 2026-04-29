@@ -1012,6 +1012,12 @@ app.delete('/api/customers/:id', (req, res) => {
 });
 
 // ── VKYC Schedule SMS — send VKYC link when customer schedules ──
+app.get('/vkyc', (req, res) => {
+  const vkycUi = process.env.VKYC_UI_URL || '';
+  const caseId = req.query.caseId || '';
+  if (vkycUi) return res.redirect(`${vkycUi}?role=applicant&caseId=${caseId}`);
+  res.redirect('https://rekyc-ui-production.up.railway.app/customer');
+});
 app.post('/api/vkyc/schedule-sms', async (req, res) => {
   const { custId, slot } = req.body;
   if (!custId) return res.status(400).json({ error: 'custId required' });
