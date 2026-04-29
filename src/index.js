@@ -1011,6 +1011,46 @@ app.delete('/api/customers/:id', (req, res) => {
   res.json({ ok: true, deleted: req.params.id });
 });
 
+// ── VKYC Webhook — called by VKYC auditor/agent when session decision is made ──
+app.post('/api/vkyc/callback', (req, res) => {
+  const { custId, caseId, decision, remarks, sessionId, decidedBy } = req.body;
+  const id = custId || caseId;
+  if (!id || !decision) {
+    return res.status(400).json({ error: 'custId/caseId and decision required' });
+  }
+  const db = loadDb();
+  const c = db.customers[id] || Object.values(db.customers).find(x => x.id === id);
+  if (!c) {
+    return res.status(404).json({ error: `Customer ${id} not found` });
+  }
+  const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const vkycStatus = decision === 'approve' ? 'Completed'
+    : decision === 'reject'  ? 'Rejected'
+    : 'Pending Auditor Review';
+
+  c.vkycStep = { status: vkycStatus, date: today, sessionId, decidedBy, remarks };
+
+  // Also update overall customer status based on VKYC decision
+  if (decision === 'approve') {
+    c.status = 'Completed';
+    c.completedDate = today;
+  } else if (decision === 'reject') {
+    c.status = 'Rejected';
+  } else if (decision === 'pending_audit') {
+    c.status = 'Pending Verification';
+    c.vkycStep = { status: 'Pending Auditor Review', date: today, sessionId };
+  }
+
+  c.reminders.push({
+    ch: 'System', date: today,
+    status: `VKYC ${vkycStatus}${remarks ? ' — ' + remarks : ''}`,
+  });
+
+  saveDb(db);
+  console.log(`VKYC callback: ${id} → ${vkycStatus}`);
+  res.json({ ok: true, custId: id, vkycStatus });
+});
+
 app.post('/api/reset', (_, res) => {
   try { fs.readdirSync(UPLOAD_DIR).forEach(f => fs.unlinkSync(path.join(UPLOAD_DIR, f))); } catch(e) {}
   saveDb(SEED); res.json({ ok: true });
