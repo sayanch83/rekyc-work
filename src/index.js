@@ -1029,21 +1029,24 @@ app.post('/api/vkyc/schedule-sms', async (req, res) => {
 
   if (twilioClient && c.mobile) {
     try {
+      const mobileE164 = '+' + c.mobile.replace(/\D/g, '');
       let smsParams;
       if (process.env.TWILIO_PHONE_NUMBER) {
-        smsParams = { body: msg, to: c.mobile, from: process.env.TWILIO_PHONE_NUMBER };
+        smsParams = { body: msg, to: mobileE164, from: process.env.TWILIO_PHONE_NUMBER };
       } else if (process.env.TWILIO_MESSAGING_SERVICE_SID) {
-        smsParams = { body: msg, to: c.mobile, messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID };
+        smsParams = { body: msg, to: mobileE164, messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID };
       } else {
         throw new Error('No TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID configured');
       }
+      console.log(`VKYC schedule SMS: to=${mobileE164}, slot=${slot}`);
       const result = await twilioClient.messages.create(smsParams);
-      console.log(`VKYC schedule SMS sent to ${c.mobile} — SID: ${result.sid}, slot: ${slot}`);
+      console.log(`VKYC schedule SMS sent — SID: ${result.sid}, status: ${result.status}`);
     } catch(e) {
-      console.error('VKYC schedule SMS failed:', e.message);
+      console.error('VKYC schedule SMS FAILED:', e.message, e.code || '');
     }
   } else {
-    console.log(`[DEMO] VKYC schedule SMS — twilioClient=${!!twilioClient}, mobile=${c.mobile}, link: ${link}`);
+    console.log(`[DEMO] VKYC schedule SMS skipped — twilioClient=${!!twilioClient}, mobile=${c.mobile}`);
+    console.log(`[DEMO] Link: ${link}`);
   }
 
   // Also add to VKYC queue if API is configured
