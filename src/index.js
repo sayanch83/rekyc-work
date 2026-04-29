@@ -1011,6 +1011,60 @@ app.delete('/api/customers/:id', (req, res) => {
   res.json({ ok: true, deleted: req.params.id });
 });
 
+// ── VKYC Schedule SMS — send VKYC link when customer schedules ──
+app.post('/api/vkyc/schedule-sms', async (req, res) => {
+  const { custId, slot } = req.body;
+  if (!custId) return res.status(400).json({ error: 'custId required' });
+  const db = loadDb();
+  const c = db.customers[custId];
+  if (!c) return res.status(404).json({ error: 'Customer not found' });
+
+  const vkycUi = process.env.VKYC_UI_URL || '';
+  const vkycApi = process.env.VKYC_API_URL || '';
+  const link = vkycUi
+    ? `${vkycUi}?role=applicant&caseId=${custId}`
+    : `${process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app'}/customer`;
+
+  const msg = `National Bank: Your Video KYC session is scheduled for ${slot}.\n\nClick the link below to join at your scheduled time:\n${link}\n\nThis link is valid for 3 days. Please keep your PAN card ready.`;
+
+  if (twilioClient && c.mobile) {
+    try {
+      const smsParams = { body: msg, to: c.mobile };
+      if (process.env.TWILIO_PHONE_NUMBER) smsParams.from = process.env.TWILIO_PHONE_NUMBER;
+      else if (process.env.TWILIO_MESSAGING_SERVICE_SID) smsParams.messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
+      await twilioClient.messages.create(smsParams);
+      console.log(`VKYC schedule SMS sent to ${c.mobile} for slot: ${slot}`);
+    } catch(e) {
+      console.warn('VKYC schedule SMS failed:', e.message);
+    }
+  } else {
+    console.log(`[DEMO] VKYC schedule SMS for ${c.name}: ${link} — slot: ${slot}`);
+  }
+
+  // Also add to VKYC queue if API is configured
+  if (vkycApi) {
+    try {
+      await fetch(`${vkycApi}/queue/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: custId, name: c.name, mobile: c.mobile,
+          appId: custId, product: c.relationship || 'Banking Account',
+          pan: c.pan, dob: c.dob, address: c.address,
+          scheduledSlot: slot, status: 'scheduled',
+        })
+      });
+      console.log(`Added ${custId} to VKYC queue for slot: ${slot}`);
+    } catch(e) {
+      console.warn('VKYC queue add failed:', e.message);
+    }
+  }
+
+  c.reminders.push({ ch: 'SMS', date: now(), status: `VKYC session link sent — scheduled for ${slot}` });
+  saveDb(db);
+  res.json({ ok: true, slot, link });
+});
+
 // ── VKYC Webhook — called by VKYC auditor/agent when session decision is made ──
 app.post('/api/vkyc/callback', (req, res) => {
   const { custId, caseId, decision, remarks, sessionId, decidedBy } = req.body;
