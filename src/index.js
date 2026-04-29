@@ -1025,27 +1025,33 @@ app.post('/api/vkyc/schedule-sms', async (req, res) => {
     ? `${vkycUi}?role=applicant&caseId=${custId}`
     : `${process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app'}/customer`;
 
-  const msg = `National Bank: Your Video KYC session is scheduled for ${slot}.\n\nClick the link below to join at your scheduled time:\n${link}\n\nThis link is valid for 3 days. Please keep your PAN card ready.`;
+  const slotShort = slot.split(' · ').slice(1).join(' ') || slot;
+  const rekycBase = 'https://rekyc-work-production.up.railway.app';
+  const smsLink = `${rekycBase}/vkyc?caseId=${custId}`;
+  const msg1 = `National Bank: Your Video KYC is scheduled for ${slotShort}. A link will follow in the next SMS.`;
+  const msg2 = `National Bank VKYC link (valid 3 days): ${smsLink}`;
 
   if (twilioClient && c.mobile) {
     try {
       const mobileE164 = '+' + c.mobile.replace(/\D/g, '');
-      let smsParams;
+      let smsBase;
       if (process.env.TWILIO_PHONE_NUMBER) {
-        smsParams = { body: msg, to: mobileE164, from: process.env.TWILIO_PHONE_NUMBER };
+        smsBase = { to: mobileE164, from: process.env.TWILIO_PHONE_NUMBER };
       } else if (process.env.TWILIO_MESSAGING_SERVICE_SID) {
-        smsParams = { body: msg, to: mobileE164, messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID };
+        smsBase = { to: mobileE164, messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID };
       } else {
-        throw new Error('No TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID configured');
+        throw new Error('No Twilio sender configured');
       }
-      console.log(`VKYC schedule SMS: to=${mobileE164}, slot=${slot}`);
-      const result = await twilioClient.messages.create(smsParams);
-      console.log(`VKYC schedule SMS sent — SID: ${result.sid}, status: ${result.status}`);
+      const r1 = await twilioClient.messages.create({ ...smsBase, body: msg1 });
+      console.log(`VKYC SMS1 sent — SID: ${r1.sid}`);
+      await new Promise(res => setTimeout(res, 1000));
+      const r2 = await twilioClient.messages.create({ ...smsBase, body: msg2 });
+      console.log(`VKYC SMS2 (link) sent — SID: ${r2.sid}`);
     } catch(e) {
-      console.error('VKYC schedule SMS FAILED:', e.message, e.code || '');
+      console.error('VKYC schedule SMS FAILED:', e.message);
     }
   } else {
-    console.log(`[DEMO] VKYC schedule SMS skipped — twilioClient=${!!twilioClient}, mobile=${c.mobile}`);
+    console.log(`[DEMO] VKYC SMS skipped — link: ${smsLink}`);
     console.log(`[DEMO] Link: ${link}`);
   }
 
