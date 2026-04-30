@@ -1011,13 +1011,15 @@ app.delete('/api/customers/:id', (req, res) => {
   res.json({ ok: true, deleted: req.params.id });
 });
 
-// ── VKYC Schedule SMS — send VKYC link when customer schedules ──
+// ── VKYC redirect — routes through rekyc-work domain so Indian carriers don't block SMS ──
 app.get('/vkyc', (req, res) => {
   const vkycUi = process.env.VKYC_UI_URL || '';
   const caseId = req.query.caseId || '';
   if (vkycUi) return res.redirect(`${vkycUi}?role=applicant&caseId=${caseId}`);
   res.redirect('https://rekyc-ui-production.up.railway.app/customer');
 });
+
+// ── VKYC Schedule SMS — send VKYC link when customer schedules ──
 app.post('/api/vkyc/schedule-sms', async (req, res) => {
   const { custId, slot } = req.body;
   if (!custId) return res.status(400).json({ error: 'custId required' });
@@ -1031,10 +1033,11 @@ app.post('/api/vkyc/schedule-sms', async (req, res) => {
     ? `${vkycUi}?role=applicant&caseId=${custId}`
     : `${process.env.FRONTEND_URL || 'https://rekyc-ui-production.up.railway.app'}/customer`;
 
+  // Send as two separate messages — carriers filter URLs mixed with text
   const slotShort = slot.split(' · ').slice(1).join(' ') || slot;
-  const rekycBase = 'https://rekyc-work-production.up.railway.app';
+  const rekycBase = process.env.REKYC_API_URL_PUBLIC || 'https://rekyc-work-production.up.railway.app';
   const smsLink = `${rekycBase}/vkyc?caseId=${custId}`;
-  const msg1 = `National Bank: Your Video KYC is scheduled for ${slotShort}. A link will follow in the next SMS.`;
+  const msg1 = `National Bank: Your Video KYC is scheduled for ${slotShort}. A separate link will follow. Keep PAN ready.`;
   const msg2 = `National Bank VKYC link (valid 3 days): ${smsLink}`;
 
   if (twilioClient && c.mobile) {
@@ -1046,25 +1049,26 @@ app.post('/api/vkyc/schedule-sms', async (req, res) => {
       } else if (process.env.TWILIO_MESSAGING_SERVICE_SID) {
         smsBase = { to: mobileE164, messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID };
       } else {
-        throw new Error('No Twilio sender configured');
+        throw new Error('No TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID configured');
       }
       const r1 = await twilioClient.messages.create({ ...smsBase, body: msg1 });
-      console.log(`VKYC SMS1 sent — SID: ${r1.sid}`);
-      await new Promise(res => setTimeout(res, 1000));
+      console.log(`VKYC schedule SMS1 sent — SID: ${r1.sid}, status: ${r1.status}`);
+      // Small delay between messages
+      await new Promise(resolve => setTimeout(resolve, 1000));
       const r2 = await twilioClient.messages.create({ ...smsBase, body: msg2 });
-      console.log(`VKYC SMS2 (link) sent — SID: ${r2.sid}`);
+      console.log(`VKYC schedule SMS2 (link) sent — SID: ${r2.sid}, status: ${r2.status}`);
     } catch(e) {
-      console.error('VKYC schedule SMS FAILED:', e.message);
+      console.error('VKYC schedule SMS FAILED:', e.message, e.code || '');
     }
   } else {
-    console.log(`[DEMO] VKYC SMS skipped — link: ${smsLink}`);
-    console.log(`[DEMO] Link: ${link}`);
+    console.log(`[DEMO] VKYC schedule SMS skipped — twilioClient=${!!twilioClient}, mobile=${c.mobile}`);
+    console.log(`[DEMO] Link: ${smsLink}`);
   }
 
   // Also add to VKYC queue if API is configured
   if (vkycApi) {
     try {
-      await fetch(`${vkycApi}/queue/add`, {
+      await fetch(`${vkycApi}/agent/queue/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
