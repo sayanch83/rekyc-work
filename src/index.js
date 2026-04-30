@@ -1011,6 +1011,19 @@ app.delete('/api/customers/:id', (req, res) => {
   res.json({ ok: true, deleted: req.params.id });
 });
 
+// ── VKYC Scheduled Cases — VKYC agent fetches on startup to restore queue ──
+app.get('/api/vkyc/scheduled-cases', (_, res) => {
+  const db = loadDb();
+  const cases = Object.values(db.customers).filter(c =>
+    c.vkycStep?.status === 'Scheduled' || c.status === 'Pending VKYC'
+  ).map(c => ({
+    id: c.id, name: c.name, mobile: c.mobile,
+    relationship: c.relationship, pan: c.pan, dob: c.dob,
+    address: c.address, vkycScheduled: c.vkycScheduled,
+  }));
+  res.json({ cases });
+});
+
 // ── VKYC redirect — routes through rekyc-work domain so Indian carriers don't block SMS ──
 app.get('/vkyc', (req, res) => {
   const vkycUi = process.env.VKYC_UI_URL || '';
